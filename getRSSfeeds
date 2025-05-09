@@ -1,0 +1,169 @@
+# RSS Feed Module for News Extraction and Ontology Update
+
+# Install required libraries
+!pip install feedparser textblob
+
+# Import libraries
+import feedparser
+import pandas as pd
+from textblob import TextBlob
+import re
+
+# Define RSS feed URLs (sourced from web research)
+rss_feeds = {
+    "New York Times - Business": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+    "Washington Post - Business": "https://feeds.washingtonpost.com/rss/business?itid=lk_inline_manual_36",
+    "Wall Street Journal - Markets": "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain",
+    "Reuters FX": "https://www.reuters.com/feedsNews/FXNews",
+    "Bloomberg Currencies": "feeds.bloomberg.com/markets/currencies/rss.xml",
+    "Financial Times": "https://www.ft.com/currencies?format=rss",
+    "FX Street": "https://www.fxstreet.com/rss"
+}
+
+# Initialize ontology structure (minimal version for testing)
+ontology = {
+    "Assets": {
+        "CNH": {"type": "currency", "tariff_exposure": 0.0, "current_price": 7.2},
+        "MXN": {"type": "currency", "tariff_exposure": 0.0, "current_price": 20.0},
+        "JPY": {"type": "currency", "tariff_exposure": 0.0, "current_price": 150.0},
+        "Gold": {"type": "commodity", "tariff_exposure": 0.0, "current_price": 2000.0}
+    },
+    "Factors": {
+        "TariffFactor": {
+            "China": {"tariff_rate": 0.0, "trade_volume_affected": 0.0, "retaliation_likelihood": 0.0},
+            "Mexico": {"tariff_rate": 0.0, "trade_volume_affected": 0.0, "retaliation_likelihood": 0.0}
+        },
+        "ExternalFactor": {
+            "trade_war_risk": 0.0,
+            "global_risk_sentiment": "neutral"
+        }
+    },
+    "Events": {
+        "Tariff_Escalation": {"status": False, "description": ""},
+        "Trade_War_Risk_Increase": {"status": False, "description": ""}
+    }
+}
+
+# Function to fetch and parse RSS feeds
+def fetch_rss_feeds(feeds):
+    articles = []
+    for source, url in feeds.items():
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:10]:  # Limit to 10 articles per feed for testing
+                articles.append({
+                    "source": source,
+                    "title": entry.get("title", ""),
+                    "summary": entry.get("summary", entry.get("description", "")),
+                    "link": entry.get("link", ""),
+                    "published": entry.get("published", "")
+                })
+        except Exception as e:
+            print(f"Error fetching {source}: {e}")
+    return pd.DataFrame(articles)
+
+# Function to filter relevant articles and extract data
+def process_articles(articles_df):
+    keywords = {
+        "CNH": ["China", "Chinese Yuan", "CNH", "tariff", "trade war"],
+        "MXN": ["Mexico", "Mexican Peso", "MXN", "tariff"],
+        "JPY": ["Japan", "Japanese Yen", "JPY", "risk off"],
+        "Gold": ["Gold", "precious metals", "inflation", "safe haven"]
+    }
+    tariff_event_pattern = re.compile(r"tariff.*?(increase|impose|new|escalate)", re.IGNORECASE)
+    trade_war_pattern = re.compile(r"trade war|retaliation|sanctions", re.IGNORECASE)
+
+    relevant_articles = []
+    for _, row in articles_df.iterrows():
+        text = (row["title"] + " " + row["summary"]).lower()
+        for asset, kws in keywords.items():
+            if any(kw.lower() in text for kw in kws):
+                # Sentiment analysis
+                blob = TextBlob(row["summary"])
+                sentiment = blob.sentiment.polarity  # -1 (negative) to 1 (positive)
+                # Check for tariff or trade war events
+                tariff_event = bool(tariff_event_pattern.search(text))
+                trade_war_event = bool(trade_war_pattern.search(text))
+                relevant_articles.append({
+                    "asset": asset,
+                    "source": row["source"],
+                    "title": row["title"],
+                    "summary": row["summary"],
+                    "sentiment": sentiment,
+                    "tariff_event": tariff_event,
+                    "trade_war_event": trade_war_event,
+                    "link": row["link"]
+                })
+    return pd.DataFrame(relevant_articles)
+
+# Function to update ontology based on articles
+def update_ontology(ontology, relevant_articles):
+    trade_war_risk = 0.0
+    tariff_updates = {"China": 0.0, "Mexico": 0.0}
+    events = {"Tariff_Escalation": False, "Trade_War_Risk_Increase": False}
+
+    for _, row in relevant_articles.iterrows():
+        asset = row["asset"]
+        sentiment = row["sentiment"]
+        # Update trade war risk (average negative sentiment increases risk)
+        if row["trade_war_event"]:
+            trade_war_risk += max(0, -sentiment)  # Negative sentiment increases risk
+            events["Trade_War_Risk_Increase"] = True
+        # Update tariff factors
+        if row["tariff_event"]:
+            if asset == "CNH" and "china" in row["summary"].lower():
+                tariff_updates["China"] += 0.05  # Indicative tariff rate increase
+                events["Tariff_Escalation"] = True
+            elif asset == "MXN" and "mexico" in row["summary"].lower():
+                tariff_updates["Mexico"] += 0.05
+                events["Tariff_Escalation"] = True
+        # Update asset tariff exposure
+        ontology["Assets"][asset]["tariff_exposure"] = min(1.0, ontology["Assets"][asset]["tariff_exposure"] + 0.1 * -sentiment)
+
+    # Normalize trade war risk
+    trade_war_risk = min(1.0, trade_war_risk / max(1, len(relevant_articles)))
+    ontology["Factors"]["ExternalFactor"]["trade_war_risk"] = trade_war_risk
+    ontology["Factors"]["ExternalFactor"]["global_risk_sentiment"] = "risk_off" if trade_war_risk > 0.5 else "neutral"
+
+    # Update tariff rates
+    for country in tariff_updates:
+        ontology["Factors"]["TariffFactor"][country]["tariff_rate"] = min(1.0, tariff_updates[country])
+        ontology["Factors"]["TariffFactor"][country]["retaliation_likelihood"] = trade_war_risk
+
+    # Update events
+    for event, status in events.items():
+        ontology["Events"][event]["status"] = status
+        if status:
+            ontology["Events"][event]["description"] = f"Detected from {len(relevant_articles)} articles"
+
+    return ontology
+
+# Run the module
+print("Fetching RSS feeds...")
+articles_df = fetch_rss_feeds(rss_feeds)
+print("\nFetched Articles:")
+print(articles_df[["source", "title", "published"]].to_string(index=False))
+
+print("\nProcessing relevant articles...")
+relevant_articles_df = process_articles(articles_df)
+print("\nRelevant Articles:")
+print(relevant_articles_df[["asset", "source", "title", "sentiment", "tariff_event", "trade_war_event"]].to_string(index=False))
+
+print("\nUpdating ontology...")
+updated_ontology = update_ontology(ontology, relevant_articles_df)
+print("\nUpdated Ontology (selected fields):")
+print("Assets:")
+for asset, details in updated_ontology["Assets"].items():
+    print(f"{asset}: {details}")
+print("Factors:")
+print(f"Trade War Risk: {updated_ontology['Factors']['ExternalFactor']['trade_war_risk']}")
+print(f"China Tariff Rate: {updated_ontology['Factors']['TariffFactor']['China']['tariff_rate']}")
+print(f"Mexico Tariff Rate: {updated_ontology['Factors']['TariffFactor']['Mexico']['tariff_rate']}")
+print("Events:")
+for event, details in updated_ontology["Events"].items():
+    print(f"{event}: {details}")
+
+# Save results for inspection
+articles_df.to_csv("rss_articles.csv", index=False)
+relevant_articles_df.to_csv("relevant_articles.csv", index=False)
+print("\nSaved articles to 'rss_articles.csv' and 'relevant_articles.csv'")
