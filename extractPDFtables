@@ -1,0 +1,29 @@
+# Step 1: Install Java and Tabula-py
+!apt-get install openjdk-11-jdk -y
+!pip install tabula-py
+
+# Step 2: Import Libraries
+import tabula
+import pandas as pd
+import os
+
+# Step 3: Set up Java Environment
+os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-11-openjdk-amd64"
+
+# Step 4: Define PDF Path (no upload needed)
+pdf_file = "/content/EmergingMarketsRatesandCurrenciesHandbook.pdf"
+
+# Step 5: Extract Tables
+tables = tabula.read_pdf(pdf_file, pages='all', multiple_tables=True)
+
+# Step 6: Save and Display Tables
+for i, table in enumerate(tables):
+    csv_name = f"/content/table_{i+1}.csv"
+    table.to_csv(csv_name, index=False)
+    print(f"\n--- Table {i+1} ---\n")
+    display(table)
+
+# Optional: Download CSVs
+from google.colab import files
+for i in range(len(tables)):
+    files.download(f"/content/table_{i+1}.csv")
