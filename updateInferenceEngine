@@ -1,0 +1,22 @@
+def update_inference_engine(ontology, model, X_train, y_train):
+    # Fetch new data (placeholder: reuse API from Step 1)
+    new_tariff_rate = ontology["Factors"]["TariffFactor"]["China"]["tariff_rate"] + np.random.normal(0, 0.05)
+    ontology["Factors"]["TariffFactor"]["China"]["tariff_rate"] = max(0, new_tariff_rate)
+    # Update training data
+    new_sample = pd.DataFrame([{
+        "tariff_rate": new_tariff_rate,
+        "trade_war_risk": ontology["Factors"]["ExternalFactor"]["trade_war_risk"],
+        "tariff_induced_inflation": ontology["Factors"]["MacroeconomicFactor"]["inflation"]["tariff_induced_inflation"],
+        "global_risk_sentiment": 1,
+        "pressure": 0 if new_tariff_rate > 0.2 else 1
+    }])
+    X_train = pd.concat([X_train, new_sample[X_train.columns]], ignore_index=True)
+    y_train = pd.concat([y_train, new_sample["pressure"]], ignore_index=True)
+    # Retrain model
+    model.fit(X_train, y_train)
+    print("Model retrained with new data.")
+    return ontology, model, X_train, y_train
+
+# Run update (example)
+ontology, model, X_train, y_train = update_inference_engine(ontology, model, X_train, y_train)
+%store ontology
