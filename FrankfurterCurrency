@@ -1,0 +1,28 @@
+import requests
+import pandas as pd
+from datetime import datetime, timedelta
+
+# Set the base currency and target currencies
+base_currency = "USD"
+target_currencies = ["EUR", "GBP", "JPY", "SGD", "AUD", "TWD", "PHP", "KRW"]
+
+# Calculate dates for last 7 days
+end_date = datetime.now().strftime('%Y-%m-%d')
+start_date = (datetime.now() - timedelta(days=20)).strftime('%Y-%m-%d')
+
+# Fetch exchange rate data
+url = f"https://api.frankfurter.app/{start_date}..{end_date}?from={base_currency}&to={','.join(target_currencies)}"
+response = requests.get(url)
+data = response.json()
+
+# Extract the rates into a DataFrame
+dates = list(data['rates'].keys())
+rates_data = []
+
+for date in dates:
+    daily_rates = data['rates'][date]
+    daily_rates['Date'] = date
+    rates_data.append(daily_rates)
+
+df = pd.DataFrame(rates_data)
+print(df)
