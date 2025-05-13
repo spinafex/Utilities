@@ -1,0 +1,600 @@
+# US Dollar Direction Inference using Markov Networks
+# Google Colab Script
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from pgmpy.models import MarkovNetwork
+from pgmpy.factors.discrete import DiscreteFactor
+from pgmpy.inference import VariableElimination
+import networkx as nx
+from sklearn.preprocessing import MinMaxScaler
+import random
+from IPython.display import display, HTML
+
+# Set random seed for reproducibility
+np.random.seed(42)
+
+# Define the factors influencing USD direction
+factors = [
+    'USD_Direction',
+    'Supply_Demand',
+    'Economic_Performance',
+    'Interest_Rates',
+    'Monetary_Policy',
+    'Inflation',
+    'Trade_Balance',
+    'Commodity_Prices',
+    'Geopolitical_Risk',
+    'Political_Stability',
+    'Risk_Appetite',
+    'Capital_Flows',
+    'Investor_Savings',
+    'Demand_Shifts',
+    'Reserve_Holdings',
+    'Speculation',
+    'Technical_Indicators'
+]
+
+# Create a Markov Network model
+model = MarkovNetwork()
+
+# Add all nodes to the model
+model.add_nodes_from(factors)
+
+# Define the graph structure (edges between related factors)
+# These relationships are based on economic theory and market dynamics
+edges = [
+    ('USD_Direction', 'Supply_Demand'),
+    ('USD_Direction', 'Economic_Performance'),
+    ('USD_Direction', 'Interest_Rates'),
+    ('USD_Direction', 'Monetary_Policy'),
+    ('USD_Direction', 'Inflation'),
+    ('USD_Direction', 'Trade_Balance'),
+    ('USD_Direction', 'Capital_Flows'),
+    ('USD_Direction', 'Technical_Indicators'),
+    
+    ('Interest_Rates', 'Monetary_Policy'),
+    ('Interest_Rates', 'Inflation'),
+    ('Interest_Rates', 'Economic_Performance'),
+    
+    ('Inflation', 'Monetary_Policy'),
+    ('Inflation', 'Economic_Performance'),
+    ('Inflation', 'Commodity_Prices'),
+    
+    ('Supply_Demand', 'Reserve_Holdings'),
+    ('Supply_Demand', 'Demand_Shifts'),
+    ('Supply_Demand', 'Trade_Balance'),
+    
+    ('Trade_Balance', 'Economic_Performance'),
+    ('Trade_Balance', 'Commodity_Prices'),
+    
+    ('Political_Stability', 'Geopolitical_Risk'),
+    ('Geopolitical_Risk', 'Risk_Appetite'),
+    
+    ('Capital_Flows', 'Risk_Appetite'),
+    ('Capital_Flows', 'Interest_Rates'),
+    ('Capital_Flows', 'Investor_Savings'),
+    
+    ('Technical_Indicators', 'Speculation'),
+    ('Commodity_Prices', 'Speculation')
+]
+
+# Add edges to the model
+model.add_edges_from(edges)
+
+# Visualize the network structure
+def visualize_markov_network(model):
+    plt.figure(figsize=(14, 10))
+    
+    # Create a NetworkX graph from the model
+    G = nx.Graph()
+    G.add_nodes_from(model.nodes())
+    G.add_edges_from(model.edges())
+    
+    # Generate a layout for the nodes
+    pos = nx.spring_layout(G, k=0.9, seed=42)
+    
+    # Draw the network
+    nx.draw(G, pos, with_labels=True, node_color='lightblue', 
+            node_size=2500, font_size=10, font_weight='bold', edge_color='gray',
+            width=1.5, alpha=0.8)
+    
+    plt.title('Markov Network for USD Direction Prediction', fontsize=16)
+    plt.tight_layout()
+    plt.show()
+
+visualize_markov_network(model)
+
+# Create compatibility factors (CPDs) between variables
+# For simplicity, each variable has states: Low (0), Medium (1), High (2)
+# USD_Direction has: Down (0), Stable (1), Up (2)
+
+# Function to create normalized compatibility matrices
+def create_compatibility_matrix(shape, bias=None):
+    """Create a compatibility matrix with optional bias toward certain states."""
+    if bias:
+        # Start with a matrix of ones
+        matrix = np.ones(shape)
+        for idx, weight in bias:
+            matrix[idx] *= weight
+    else:
+        # Random matrix with values between 0.5 and 1.5
+        matrix = np.random.uniform(0.5, 1.5, shape)
+    
+    # Normalize to ensure values represent reasonable probabilities
+    matrix = matrix / matrix.sum()
+    return matrix
+
+# Define the states for each variable
+variable_states = {factor: ['Low', 'Medium', 'High'] for factor in factors}
+variable_states['USD_Direction'] = ['Down', 'Stable', 'Up']
+
+# Now we'll add factors only for edges that exist in the model
+# This ensures that all factors are consistent with the model structure
+
+# Create a dictionary to store all the factor definitions
+factor_definitions = [
+    # 1. USD Direction and Interest Rates
+    {
+        'variables': ['USD_Direction', 'Interest_Rates'],
+        'bias': [((0, 2), 0.3),  # Down USD with High interest rates is less likely
+                 ((2, 2), 2.0),  # Up USD with High interest rates is more likely
+                 ((2, 0), 0.3)]  # Up USD with Low interest rates is less likely
+    },
+    # 2. USD Direction and Inflation
+    {
+        'variables': ['USD_Direction', 'Inflation'],
+        'bias': [((0, 2), 2.0),  # Down USD with High inflation is more likely
+                 ((2, 2), 0.3),  # Up USD with High inflation is less likely
+                 ((2, 0), 1.8)]  # Up USD with Low inflation is more likely
+    },
+    # 3. USD Direction and Economic Performance
+    {
+        'variables': ['USD_Direction', 'Economic_Performance'],
+        'bias': [((0, 2), 0.3),  # Down USD with Strong economy is less likely
+                 ((2, 2), 2.0),  # Up USD with Strong economy is more likely
+                 ((2, 0), 0.4)]  # Up USD with Weak economy is less likely
+    },
+    # 4. Interest Rates and Monetary Policy
+    {
+        'variables': ['Interest_Rates', 'Monetary_Policy'],
+        'bias': [((2, 2), 2.0),  # High rates with Tight policy
+                 ((0, 0), 2.0)]  # Low rates with Loose policy
+    },
+    # 5. USD Direction and Supply_Demand
+    {
+        'variables': ['USD_Direction', 'Supply_Demand'],
+        'bias': [((0, 2), 1.8),  # Down USD with High supply is more likely
+                 ((2, 0), 1.8)]  # Up USD with Low supply is more likely
+    },
+    # 6. USD Direction and Trade Balance
+    {
+        'variables': ['USD_Direction', 'Trade_Balance'],
+        'bias': [((0, 0), 1.8),  # Down USD with trade deficit is more likely
+                 ((2, 2), 1.8)]  # Up USD with trade surplus is more likely
+    },
+    # 7. USD Direction and Risk Appetite
+    {
+        'variables': ['USD_Direction', 'Risk_Appetite'],
+        'bias': [((0, 2), 1.2),  # Down USD with high risk appetite
+                 ((2, 0), 1.5)]  # Up USD with low risk appetite (flight to safety)
+    },
+    # 8. USD Direction and Capital Flows
+    {
+        'variables': ['USD_Direction', 'Capital_Flows'],
+        'bias': [((0, 0), 1.8),  # Down USD with low capital inflows
+                 ((2, 2), 1.8)]  # Up USD with high capital inflows
+    }
+]
+
+# Add factors, but only if the variables are neighbors in the model
+for factor_def in factor_definitions:
+    vars_pair = factor_def['variables']
+    # Check if vars are connected in the model
+    if (vars_pair[0] in model.neighbors(vars_pair[1]) or 
+        vars_pair[1] in model.neighbors(vars_pair[0])):
+        # Create and add the factor
+        factor = DiscreteFactor(
+            vars_pair, 
+            [3, 3], 
+            create_compatibility_matrix((3, 3), bias=factor_def.get('bias'))
+        )
+        model.add_factors(factor)
+
+# Add remaining factors for edges without specific definitions
+# First, collect edges already covered
+covered_edges = set()
+for factor in model.factors:
+    vars_in_factor = factor.variables
+    if len(vars_in_factor) == 2:  # Only consider pairwise factors
+        covered_edges.add(tuple(sorted(vars_in_factor)))
+
+# Add factors for remaining edges
+for edge in edges:
+    edge_tuple = tuple(sorted(edge))
+    if edge_tuple not in covered_edges:
+        factor = DiscreteFactor(edge, [3, 3], create_compatibility_matrix((3, 3)))
+        model.add_factors(factor)
+
+# Check model
+print("Model created with", len(model.nodes()), "nodes and", len(model.edges()), "edges")
+print("Number of factors:", len(model.factors))
+
+# Create inference engine
+inference = VariableElimination(model)
+
+# Function to generate synthetic evidence based on an economic scenario
+def generate_evidence(scenario):
+    """Generate evidence for variables based on the given scenario."""
+    evidence = {}
+    
+    if scenario == "strong_economy":
+        evidence = {
+            'Economic_Performance': 2,  # High
+            'Interest_Rates': 2,        # High
+            'Inflation': 0,             # Low
+            'Trade_Balance': 2,         # Surplus
+            'Political_Stability': 2,   # High
+        }
+    
+    elif scenario == "weak_economy":
+        evidence = {
+            'Economic_Performance': 0,  # Low
+            'Interest_Rates': 0,        # Low
+            'Inflation': 2,             # High
+            'Trade_Balance': 0,         # Deficit
+            'Political_Stability': 1,   # Medium
+        }
+    
+    elif scenario == "high_inflation":
+        evidence = {
+            'Inflation': 2,             # High
+            'Interest_Rates': 1,        # Medium
+            'Monetary_Policy': 1,       # Medium
+            'Commodity_Prices': 2,      # High
+        }
+    
+    elif scenario == "geopolitical_tension":
+        evidence = {
+            'Geopolitical_Risk': 2,     # High
+            'Political_Stability': 0,   # Low
+            'Risk_Appetite': 0,         # Low
+            'Commodity_Prices': 2,      # High (e.g., oil prices rising)
+        }
+        
+    elif scenario == "custom":
+        # User can define custom evidence
+        pass
+        
+    return evidence
+
+# Function to make inference about USD direction given evidence
+def infer_usd_direction(evidence):
+    """Perform inference to predict USD direction given the evidence."""
+    try:
+        # Convert string state names to integers if needed
+        for var, val in list(evidence.items()):
+            if isinstance(val, str):
+                if val in variable_states.get(var, []):
+                    evidence[var] = variable_states[var].index(val)
+        
+        # Perform inference
+        result = inference.query(variables=['USD_Direction'], evidence=evidence)
+        
+        # Debug output
+        print("Raw result from inference engine:")
+        print(result)
+        
+        return result
+    except Exception as e:
+        print(f"Error during inference: {e}")
+        # Return a uniform distribution as fallback
+        uniform = np.array([1/3, 1/3, 1/3])
+        print("Using uniform distribution as fallback")
+        
+        # Create a Factor-like object with values attribute
+        class FallbackFactor:
+            def __init__(self, values):
+                self.values = values
+                
+        return FallbackFactor(uniform)
+
+# Function to interpret results
+def interpret_results(result):
+    """Interpret the probability distribution of USD direction."""
+    states = variable_states['USD_Direction']
+    
+    # Extract the probability values - need to convert Factor to array
+    probs = result.values
+    
+    # Normalize if needed
+    if abs(probs.sum() - 1.0) > 1e-6:
+        probs = probs / probs.sum()
+    
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x=states, y=probs)
+    plt.title('Probability Distribution of USD Direction')
+    plt.ylabel('Probability')
+    plt.ylim(0, 1)
+    
+    for i, p in enumerate(probs):
+        plt.text(i, p + 0.02, f'{p:.3f}', ha='center')
+    
+    plt.tight_layout()
+    plt.show()
+    
+    most_likely = states[np.argmax(probs)]
+    print(f"Most likely USD direction: {most_likely} ({probs.max():.3f})")
+    
+    # Textual interpretation
+    interpretation = "Based on the provided economic factors, the US Dollar is most likely to "
+    
+    if most_likely == 'Up':
+        interpretation += "strengthen. This suggests favorable conditions for USD assets."
+    elif most_likely == 'Down':
+        interpretation += "weaken. This could benefit US exporters but may indicate economic challenges."
+    else:  # Stable
+        interpretation += "remain stable. This indicates balanced economic conditions."
+    
+    print(interpretation)
+    return most_likely, probs
+
+# Function to run several scenarios
+def analyze_scenarios():
+    """Analyze multiple predefined scenarios."""
+    scenarios = ["strong_economy", "weak_economy", "high_inflation", "geopolitical_tension"]
+    
+    results = {}
+    
+    for scenario in scenarios:
+        print(f"\n===== Scenario: {scenario.replace('_', ' ').title()} =====")
+        evidence = generate_evidence(scenario)
+        
+        # Display the evidence
+        evidence_display = {}
+        for var, state in evidence.items():
+            evidence_display[var] = variable_states.get(var, ['Low', 'Medium', 'High'])[state]
+        
+        print("Evidence:")
+        for var, state in evidence_display.items():
+            print(f"  - {var.replace('_', ' ')}: {state}")
+        
+        # Perform inference
+        result = infer_usd_direction(evidence)
+        direction, probs = interpret_results(result)
+        
+        results[scenario] = {
+            'direction': direction,
+            'probabilities': probs,
+            'evidence': evidence_display
+        }
+    
+    return results
+
+# Create a function to allow users to set custom evidence
+def set_custom_evidence():
+    """Create a user interface for setting custom evidence."""
+    custom_evidence = {}
+    
+    print("Set custom evidence for the Markov Network:")
+    print("For each factor, enter 0 (Low), 1 (Medium), 2 (High), or leave blank to omit.")
+    
+    # Skip USD_Direction as it's what we're trying to predict
+    for factor in factors:
+        if factor != 'USD_Direction':
+            while True:
+                value = input(f"{factor.replace('_', ' ')}: ")
+                if value == "":
+                    break  # Skip this factor
+                try:
+                    int_value = int(value)
+                    if 0 <= int_value <= 2:
+                        custom_evidence[factor] = int_value
+                        break
+                    else:
+                        print("Please enter 0, 1, or 2.")
+                except ValueError:
+                    print("Please enter a number (0, 1, or 2) or leave blank.")
+    
+    return custom_evidence
+
+# Function to generate synthetic time series data for USD and factors
+def generate_time_series(periods=100):
+    """Generate synthetic time series data for all factors."""
+    # Start with random walks for each factor
+    data = {}
+    for factor in factors:
+        # Random walk with drift and some persistence
+        if factor == 'USD_Direction':
+            # For USD, we'll derive it based on other factors later
+            continue
+        
+        # Start with a random value between 0.3 and 0.7
+        series = [np.random.uniform(0.3, 0.7)]
+        
+        # Add persistence parameter - different for each factor
+        persistence = np.random.uniform(0.7, 0.95)
+        
+        for i in range(1, periods):
+            # Random shock with some persistence
+            new_value = (persistence * series[i-1] + 
+                         (1 - persistence) * np.random.normal(0.5, 0.15))
+            
+            # Add some seasonality for certain factors
+            if factor in ['Interest_Rates', 'Monetary_Policy']:
+                new_value += 0.05 * np.sin(i / 12 * 2 * np.pi)
+            
+            # Add trends for some factors
+            if factor == 'Inflation':
+                new_value += i * 0.0005  # Small upward trend
+            
+            # Ensure values stay in reasonable range
+            new_value = max(0.05, min(0.95, new_value))
+            series.append(new_value)
+        
+        data[factor] = series
+    
+    # Create dataframe
+    df = pd.DataFrame(data)
+    
+    # Add time index
+    df.index = pd.date_range(start='2023-01-01', periods=periods, freq='W')
+    
+    return df
+
+# Function to discretize factor values into states
+def discretize_factors(df):
+    """Convert continuous factor values to discrete states (0, 1, 2)."""
+    df_discrete = df.copy()
+    
+    for col in df.columns:
+        # Use quantiles to divide into Low, Medium, High
+        boundaries = [0, 0.33, 0.67, 1.0]
+        df_discrete[col] = pd.cut(df[col], 
+                                 bins=boundaries, 
+                                 labels=[0, 1, 2], 
+                                 include_lowest=True)
+    
+    return df_discrete.astype(int)
+
+# Function to infer USD direction for time series
+def infer_usd_time_series(df_discrete):
+    """Infer USD direction for each time point in the dataset."""
+    usd_predictions = []
+    
+    for idx in df_discrete.index:
+        # Get evidence for this time point
+        evidence = df_discrete.loc[idx].to_dict()
+        
+        # Remove NaN values
+        evidence = {k: v for k, v in evidence.items() if pd.notna(v)}
+        
+        # Don't include USD_Direction if it exists in the evidence
+        if 'USD_Direction' in evidence:
+            del evidence['USD_Direction']
+        
+        # Perform inference
+        if evidence:  # Only if we have some evidence
+            result = infer_usd_direction(evidence)
+            prediction = np.argmax(result.values)
+            usd_predictions.append(prediction)
+        else:
+            # If no evidence, assume stable (1)
+            usd_predictions.append(1)
+    
+    return usd_predictions
+
+# Function to backtest the model
+def backtest_model(periods=100):
+    """Generate synthetic data and backtest the model."""
+    # Generate synthetic data
+    print("Generating synthetic time series data...")
+    df = generate_time_series(periods)
+    
+    # Discretize the data
+    df_discrete = discretize_factors(df)
+    
+    # Infer USD direction
+    print("Inferring USD direction...")
+    usd_predictions = infer_usd_time_series(df_discrete)
+    
+    # Add predictions to dataframe
+    df['USD_Direction_Predicted'] = usd_predictions
+    
+    # Generate "actual" USD direction with some noise
+    # (in a real scenario, this would be the actual observed USD movement)
+    
+    # For demonstration, we'll create a simplified "actual" USD direction
+    # based on selected factors, plus some randomness
+    def simplified_usd_model(row):
+        # Simple model: USD up with high interest rates, good economy, low inflation
+        score = (0.3 * row['Interest_Rates'] +
+                 0.3 * row['Economic_Performance'] -
+                 0.2 * row['Inflation'] + 
+                 0.2 * row['Trade_Balance'] -
+                 0.1 * row['Geopolitical_Risk'])
+        
+        # Add noise
+        score += np.random.normal(0, 0.15)
+        
+        # Convert to discrete states
+        if score > 0.2:
+            return 2  # Up
+        elif score < -0.2:
+            return 0  # Down
+        else:
+            return 1  # Stable
+    
+    # Apply the simplified model
+    df['USD_Direction_Actual'] = df.apply(simplified_usd_model, axis=1)
+    
+    # Calculate accuracy
+    accuracy = sum(df['USD_Direction_Predicted'] == df['USD_Direction_Actual']) / len(df)
+    print(f"Model accuracy: {accuracy:.2f}")
+    
+    # Visualize results
+    plt.figure(figsize=(14, 10))
+    
+    # Plot 1: USD Direction (Predicted vs Actual)
+    plt.subplot(3, 1, 1)
+    plt.plot(df.index, df['USD_Direction_Predicted'], 'b-', label='Predicted')
+    plt.plot(df.index, df['USD_Direction_Actual'], 'r--', label='Actual')
+    plt.ylabel('USD Direction\n(0:Down, 1:Stable, 2:Up)')
+    plt.title('USD Direction Prediction vs Actual')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Plot 2: Selected Factors
+    plt.subplot(3, 1, 2)
+    for factor in ['Interest_Rates', 'Inflation', 'Economic_Performance']:
+        plt.plot(df.index, df[factor], label=factor)
+    plt.ylabel('Factor Value')
+    plt.title('Selected Economic Factors')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Plot 3: Confusion Matrix
+    plt.subplot(3, 1, 3)
+    cm = pd.crosstab(df['USD_Direction_Actual'], df['USD_Direction_Predicted'], 
+                    rownames=['Actual'], colnames=['Predicted'])
+    
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+               xticklabels=['Down', 'Stable', 'Up'],
+               yticklabels=['Down', 'Stable', 'Up'])
+    plt.title('Confusion Matrix')
+    
+    plt.tight_layout()
+    plt.show()
+    
+    return df, accuracy
+
+# Main execution function
+def run_markov_network_analysis():
+    print("US Dollar Direction Prediction using Markov Networks\n")
+    print("This model uses a Markov Network to infer the likely direction of the US Dollar")
+    print("based on various economic and market factors.\n")
+    
+    # Run predefined scenarios
+    print("\n==== Analyzing Predefined Scenarios ====")
+    results = analyze_scenarios()
+    
+    # Backtest the model with synthetic data
+    print("\n==== Backtesting with Synthetic Data ====")
+    backtest_data, accuracy = backtest_model(periods=100)
+    
+    # Option for custom evidence
+    print("\n==== Custom Scenario Analysis ====")
+    print("Would you like to analyze a custom scenario? (y/n)")
+    if input().lower() == 'y':
+        custom_evidence = set_custom_evidence()
+        if custom_evidence:
+            print("\n=== Custom Scenario Results ===")
+            result = infer_usd_direction(custom_evidence)
+            interpret_results(result)
+    
+    print("\nAnalysis complete!")
+
+# Run the analysis
+run_markov_network_analysis()
